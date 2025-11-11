@@ -1,9 +1,40 @@
 import numpy as np
-import librosa 
-from pydub import AudioSegment
+import math
+import matplotlib.pyplot as plt
 
-y, sr = librosa.load("/home/plutoSDR/dev/audio/new_smeh.mp3", sr=44100, mono=True)
+# Открываем файл для чтения
+name = "/home/plutoSDR/dev/txstart.pcm"
 
-pcm_data = (y * 32767).astype(np.int16)
+data = []
+imag = []
+real = []
+count = []
+counter = 0
+absIQ = []
+with open(name, "rb") as f:
+    index = 0
+    while (byte := f.read(2)):
+        I = 0
+        Q = 0
+        if(index %2 == 0):
+            Q = int.from_bytes(byte, byteorder='little', signed=True)
+            real.append(Q)
+            counter += 1
+            count.append(counter)
+        else:
+            I = int.from_bytes(byte, byteorder='little', signed=True)
+            imag.append(I)
+        
+        index += 1
+    for i in range(len(imag)):
+        abs = math.sqrt(imag[i]**2 + real[i]**2)
+        absIQ.append(abs)
+        
+# Инициализируем список для хранения данных
 
-pcm_data.tofile("../audio.pcm")
+# fig, axs = plt.subplots(2, 1, layout='constrained')
+plt.figure(1)
+# axs\[1\].plot(count, np.abs(data),  color='grey')  # Используем scatter для диаграммы созвездия
+plt.plot(count,(imag),color='red')  # Используем scatter для диаграммы созвездия
+plt.plot(count,(real), color='blue')  # Используем scatter для диаграммы созвездия
+plt.show()

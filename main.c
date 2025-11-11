@@ -5,32 +5,94 @@
 #include <stdint.h>
 #include <complex.h>
 
-int16_t *read_pcm(const char *filename, size_t *sample_count)
-{
-    FILE *file = fopen(filename, "rb");
+#include <stdio.h>
+#include <stdlib.h>
 
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    printf("file_size = %ld\n", file_size);
-    int16_t *samples = (int16_t *)malloc(file_size);
+int* to_bpsk(int *array, int length){
+     int *IQ = (int*)malloc(length*2 * sizeof(int));
+   
 
-    *sample_count = file_size / sizeof(int16_t);
-
-    size_t sf = fread(samples, sizeof(int16_t), *sample_count, file);
-
-    if (sf == 0){
-        printf("file %s empty!", filename);
-    }
-
-    fclose(file);
-
-    return samples;
+     for(int i = 0; i < length; i++){
+        if(array[i] == 0){
+            IQ[2*i] = 1;  
+        }
+        else{
+            IQ[2*i] = -1; 
+        }
+        IQ[2*i+1] = 0;
+     }
+     return IQ;
 }
 
 
-int main(){
+int* upsampling(int *IQ, int length, int sample) {
+    int k = 0;
+    int *tx_buff = (int*)malloc(length * sample * sizeof(int) / 2);
+    for (int i = 0; i < length; i += 2) {
+        tx_buff[k] = IQ[i];
+        k++;
+        
+        for(int j = 0; j < sample - 1; j++) {
+            tx_buff[k] = 0;
+            k++;
+        }
+    }
+    return tx_buff;
+}
 
+
+int* convolve_filter(int array[], int mask[], int len, int len_mask) {
+    int output_len = len + len_mask - 1;
+    int *output = (int*)malloc(output_len * sizeof(int));
+    
+    // Инициализируем ВЕСЬ выходной массив
+    for (int i = 0; i < output_len; i++) {
+        output[i] = 0;
+    }
+    
+    // Выполняем свертку
+    for (int i = 0; i < len; i++) {
+        for (int j = 0; j < len_mask; j++) {
+            output[i + j] += array[i] * mask[j];
+        }
+    }
+    
+    return output;
+}
+
+int main(){
+    int array[] = {0,1,1,0,1,0,0,0,0,1,1,0,0,1,0,1,0,1,1,0,1,1,0,0,0,1,1,0,1,1,0,0,0,1,1,0,1,1,1,1,0,
+        0,1,0,0,0,0,0,0,1,1,1,0,1,1,0,0,1,1,0,1,1,1,1,0,1,1,1,0,1,1,0,0,1,1,0,0,0,0,1}; 
+    int length = sizeof(array)/sizeof(array[0]); 
+
+    int mask[] = {1,1,1,1,1,1,1,1,1,1};
+    int len_mask = sizeof(mask)/sizeof(mask[0]);
+
+    int* array_bpsk = to_bpsk(array, length);
+    printf("IQ\n");
+    for(int i = 0; i < length * 2; i += 2){  
+        printf("%d %d ", array_bpsk[i], array_bpsk[i+1]);
+    }
+    
+    int* tx = upsampling(array_bpsk, length * 2, 10);
+    int lenTX = length * 10;  // Длина после upsampling
+    
+    printf("\nUPSAMPLING\n");
+    for(int i = 0; i < lenTX; i++){  
+        printf("%d ", tx[i]);
+    }
+    
+    // ИСПРАВЛЕННЫЙ ВЫЗОВ
+    int* tx_conv = convolve_filter(tx, mask, lenTX, len_mask);  
+    int conv_length = lenTX + len_mask - 1;
+
+    printf("\nCONVOLUTION RESULT:\n");
+    for(int i = 0; i < conv_length; i++){  
+        printf("%d ", tx_conv[i]);
+    }
+    printf("\n");
+    
+    printf("\n");
     SoapySDRKwargs args = {};
     SoapySDRKwargs_set(&args, "driver", "plutosdr");        // Говорим какой Тип устройства 
     if (1) {
@@ -76,22 +138,25 @@ int main(){
     // Выделяем память под буферы RX и TX
     int16_t rx_buffer[2*rx_mtu];
 
-    size_t sample_count;
-    FILE *filename = "audio.pcm";
-    int16_t *samples = read_pcm(filename, &sample_count);
-    printf("OUR SAMPLE COUNT = %d\n", sample_count);
+    // size_t sample_count;
+    //FILE *filename = "audio.pcm";
+    //int16_t *samples = &sample_count;
+    //printf("OUR SAMPLE COUNT = %d\n", sample_count);
 
-    int16_t tx_buff[2 * sample_count];
+    int16_t tx_buff[2 * conv_length];
 
-    for(int i = 0; i < sample_count; i++){
-        tx_buff[2*i] = samples[i];
+    for(int i = 0; i < conv_length; i++){
+        tx_buff[2*i] = (int16_t)tx_conv[i]* 1500 <<4;
         tx_buff[2*i+1] = 0;
     }
 
-    FILE *file1 = fopen("txstart.pcm", "w");
-    fwrite(tx_buff, sizeof(int16_t), 2 * rx_mtu, file1);
+    FILE *file1 = fopen("txstart.pcm", "wb");
+    fwrite(tx_buff, sizeof(int16_t), 2 * conv_length, file1);
     fclose(file1);
-
+    free(array_bpsk);
+    free(tx);
+    free(tx_conv);
+   
     //prepare fixed bytes in transmit buffer
     //we transmit a pattern of FFFF FFFF [TS_0]00 [TS_1]00 [TS_2]00 [TS_3]00 [TS_4]00 [TS_5]00 [TS_6]00 [TS_7]00 FFFF FFFF
     //that is a flag (FFFF FFFF) followed by the 64 bit timestamp, split into 8 bytes and packed into the lsb of each of the DAC words.
@@ -106,10 +171,10 @@ int main(){
     const long  timeoutUs = 400000;
     long long last_time = 0;
     // Количество итерация чтения из буфера
-    size_t iteration_count = 600;
+    size_t iteration_count = 6;
 
 
-    FILE *file2 = fopen("txdata.pcm", "w");
+     FILE *file2 = fopen("txdata.pcm", "w");
 
     // Начинается работа с получением и отправкой сэмплов
     for (size_t buffers_read = 0; buffers_read < iteration_count; buffers_read++)
@@ -132,21 +197,14 @@ int main(){
 
         void *tx_buffs[] = {tx_buff};
         size_t offset = buffers_read * tx_mtu;
+        int tx_flags = SOAPY_SDR_HAS_TIME;
+        
+        if(buffers_read == 0){
+             int st = SoapySDRDevice_writeStream(sdr, txStream, (const void * const*)tx_buffs, tx_mtu, &tx_flags, tx_time, timeoutUs);
 
-        if(offset < sample_count) {
-            printf("buffers_read: %zu, offset: %zu\n", buffers_read, offset);
-
-            int tx_flags = SOAPY_SDR_HAS_TIME;
-            
-            void *tx_buffs_offset[] = {tx_buff + (2 * offset)};
-            
-            int st = SoapySDRDevice_writeStream(sdr, txStream, (const void * const*)tx_buffs_offset, tx_mtu, &tx_flags, tx_time, timeoutUs);
-                
-        }
-
+        }    
+       
     }
-    // Исправление: используйте двойные кавычки для строки режима
-
 
     // Записываем данные в формате I Q (через пробел)
 
