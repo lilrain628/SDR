@@ -94,7 +94,7 @@ int main(){
     
     printf("\n");
     SoapySDRKwargs args = {};
-    SoapySDRKwargs_set(&args, "driver", "plutosdr");        // Говорим какой Тип устройстваff 
+    SoapySDRKwargs_set(&args, "driver", "plutosdr");        // Говорим какой Тип устройстваffsdf 
     if (1) {
         SoapySDRKwargs_set(&args, "uri", "usb:");           // Способ обмена сэмплами (USB)
     } else {
